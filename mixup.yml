@@ -1,0 +1,43 @@
+program: train_student.py
+method: grid
+project: xxx
+parameters:
+  wdb_entity:
+    value: xxx
+  wdb_project:
+    value: xxx
+  _tags:
+    value: baseline, mixup
+  trial:
+    value: 1
+  seed:
+    values:
+      - 1
+      - 2
+      - 3
+  w_kd:
+    value: 0.0
+  relational:
+    values:
+      - mixup
+      - mixup3
+  model_s:
+    values:
+      - resnet32
+      - wrn_16_2
+      - vgg8
+  learning_rate:
+    values:
+      - 0.1
+      - 0.05
+      - 0.025
+  subset_size:
+    values:
+      - 2000
+      - 2500
+      - 3000
+      - 3500
+      - 4000
+      - 4500
+      - 5000
+      - 6000
