@@ -22,7 +22,8 @@ from models import model_dict
 from models.util import Embed, ConvReg, LinearEmbed
 from models.util import Connector, Translator, Paraphraser
 
-from dataset.cifar100 import get_cifar100_dataloaders #, get_cifar100_dataloaders_sample
+from dataset.cifar100 import get_cifar100_dataloaders
+from dataset.stanfordcars import get_stanfordcars_dataloaders
 
 from helper.util import adjust_learning_rate, early_stopping_adjust_lr, get_config_str
 
@@ -35,7 +36,6 @@ from helper.TrainHelpers import TrainHelpers
 from helper.CRDTrainHelpers import CRDTrainHelpers
 from helper.CKDTrainHelpers import CKDTrainHelpers
 from helper.MixupTrainHelpers import MixupTrainHelpers
-from helper.MixupThreeTrainHelpers import MixupThreeTrainHelpers
 from helper.InterTrainHelpers import InterTrainHelpers
 from helper.InterCKDTrainHelpers import InterCKDTrainHelpers
 from helper.CutMixHelpers import CutMixHelpers
@@ -49,7 +49,6 @@ w_rel_defaults = {
     'ckd_inter': 1,
     'dist': 2,
     'mixup': 1,
-    'mixup3': 1,
     'cutmix': 1
 }
 
@@ -89,7 +88,7 @@ def parse_option():
     parser.add_argument('--patience', type=int, default=50, help='early stopping patience')
 
     # dataset
-    parser.add_argument('--dataset', type=str, default='cifar100', choices=['cifar100'], help='dataset')
+    parser.add_argument('--dataset', type=str, default='cifar100', choices=['cifar100', 'stanfordcars',], help='dataset')
     parser.add_argument('--subset_size', type=int, default=50000, help='subset size')
     parser.add_argument('--pretrained_subset_size', type=int, default=0, help='subset size')
     parser.add_argument('--train_val_frac', type=float, default=0.8, help='fraction of training samples for train/val split')
@@ -107,7 +106,7 @@ def parse_option():
 
     # distillation
     parser.add_argument('--relational', type=str, default=None,
-                        choices=[None, 'ckd', 'crd', 'rkd', 'pkt', 'mixup', 'dist', 'mixup3', 'ckd_mixup', 'ckd_add', 'ckd_inter',  'cutmix'])
+                        choices=[None, 'ckd', 'crd', 'rkd', 'pkt', 'mixup', 'dist', 'ckd_inter',  'cutmix'])
     parser.add_argument('--distill', type=str, default='kd',
                         choices=['kd', 'hint', 'correlation', 'vid'])
     parser.add_argument('--trial', type=str, default='1', help='trial id')
@@ -132,7 +131,7 @@ def parse_option():
     parser.add_argument('--hint_layer', default=2, type=int, choices=[0, 1, 2, 3, 4])
 
     # ckd
-    parser.add_argument('--pos_and_neg', default=3, type=int, help='pos + neg samples in ckd')
+    parser.add_argument('--pos_and_neg', default=2, type=int, help='pos + neg samples in ckd')
 
     # relational sampling
     parser.add_argument('--max_rel_samples', default=100000, type=int, help='max number of relational samples')
@@ -185,6 +184,8 @@ def parse_option():
 def get_teacher_path(teacher_name, dataset):
     if dataset == 'cifar100':
         return f'./save/models/{teacher_name}_vanilla/ckpt_epoch_240.pth'
+    elif dataset == 'stanfordcars':
+        return f'./save/models/{teacher_name}_{dataset}_lr_0.05_decay_0.0005_trial_0/ckpt_epoch_240.pth'
     else:
         raise NotImplementedError('Dataset/teacher combination not supported')
 
@@ -244,6 +245,8 @@ def main():
     # load teacher model first to cache teacher outputs
     if opt.dataset == 'cifar100':
         n_cls = 100
+    elif opt.dataset == 'stanfordcars':
+        n_cls = 196
     else:
         n_cls = 0
     model_t = load_teacher(opt.path_t, n_cls)
@@ -257,7 +260,7 @@ def main():
         relational_params = (pos, neg, opt.max_rel_samples, n_cls)
     elif opt.relational == 'crd':
         relational_params = (opt.nce_k, opt.mode, True, 1.0, n_cls)
-    elif opt.relational == 'mixup' or opt.relational == 'mixup3' or opt.relational == 'cutmix':
+    elif opt.relational == 'mixup' or opt.relational == 'cutmix':
         relational_params = (opt.max_rel_samples, n_cls)
     elif opt.relational == 'rkd':
         relational_params = opt.max_rel_samples
@@ -276,6 +279,17 @@ def main():
                                      preact=preact,
                                      use_DA=opt.use_DA,
                                      distill=opt.distill)
+    elif opt.dataset == 'stanfordcars':
+        train_loader, val_loader, test_loader, n_data = \
+            get_stanfordcars_dataloaders(model_t=model_t,
+                                         batch_size=opt.batch_size,
+                                         num_workers=opt.num_workers,
+                                         is_instance=False,
+                                         subset_size=opt.subset_size,
+                                         relational=opt.relational,
+                                         relational_params=relational_params,
+                                         preact=preact,
+                                         use_DA=opt.use_DA)
     else:
         raise NotImplementedError(opt.dataset)
 
@@ -284,6 +298,8 @@ def main():
 
     if opt.dataset == 'cifar100':
         data = torch.randn(2, 3, 32, 32).cuda()
+    elif opt.dataset == 'stanfordcars':
+        data = torch.randn(2, 3, 56, 56).cuda()
     else:
         raise NotImplementedError(opt.dataset)
     model_s.eval()
@@ -300,17 +316,17 @@ def main():
     criterion_kd = DistillKL(opt.kd_T).cuda()
 
     if opt.relational == 'ckd' or opt.relational == 'ckd_dist' or opt.relational == 'ckd_mixup' or opt.relational == 'ckd_add' or opt.relational == 'ckd_inter':
-        criterion_cls = DistillKL(opt.kd_T).cuda()
+        criterion_cls = nn.MSELoss().cuda()
     else:
         criterion_cls = nn.CrossEntropyLoss().cuda()
 
-    if opt.relational == 'mixup' or opt.relational == 'mixup3' or opt.relational == 'cutmix':
+    if opt.relational == 'mixup' or opt.relational == 'cutmix':
         if opt.loss_fn == 0:
             criterion_rel = nn.CrossEntropyLoss().cuda()
         else:
             criterion_rel = DistillKL(opt.kd_T).cuda()
     elif opt.relational == 'ckd' or opt.relational == 'ckd_mixup' or opt.relational == 'ckd_add' or opt.relational == 'ckd_inter':
-        criterion_rel = DistillKL(opt.kd_T).cuda()
+        criterion_rel = nn.MSELoss().cuda()
     elif opt.relational == 'crd':
         opt.s_dim = logit_s.shape[1]
         opt.t_dim = logit_t.shape[1]
@@ -363,7 +379,6 @@ def main():
         'ckd': CKDTrainHelpers,
         'crd': CRDTrainHelpers,
         'mixup': MixupTrainHelpers,
-        'mixup3': MixupThreeTrainHelpers,
         'cutmix': CutMixHelpers
     }
 

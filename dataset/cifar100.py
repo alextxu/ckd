@@ -11,7 +11,6 @@ import torch
 from .util import train_val_split, CachedSubset, CachedSubsetWithInput
 from dataset.sampling.CKDSample import CKDSample
 from dataset.sampling.MixupSample import MixupSample
-from dataset.sampling.MixupThreeSample import MixupThreeSample
 from dataset.sampling.CRDSample import CRDSample
 from dataset.sampling.RKDSampler import RKDSampler
 from dataset.sampling.CKDMixupSample import CKDMixupSample
@@ -114,7 +113,7 @@ def get_cifar100_dataloaders(model_t, batch_size=128, num_workers=8, is_instance
 
     # special sampling methods for relational techniques
     batch_sampler = None
-    if relational == 'ckd' or relational == 'ckd_mixup' or relational == 'ckd_add':
+    if relational == 'ckd':
         relational_train = CKDSample(train_split, relational_params)
     elif relational == 'ckd_inter':
         relational_train = InterCKDSample(train_split, relational_params)
@@ -122,8 +121,6 @@ def get_cifar100_dataloaders(model_t, batch_size=128, num_workers=8, is_instance
         relational_train = CKDMixupSample(train_split, relational_params)
     elif relational == 'mixup' or relational == 'cutmix':
         relational_train = MixupSample(train_split, relational_params)
-    elif relational == 'mixup3':
-        relational_train = MixupThreeSample(train_split, relational_params)
     elif relational == 'crd':
         relational_train = CRDSample(train_split, relational_params)
     elif relational == 'rkd':

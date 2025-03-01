@@ -131,3 +131,4 @@ high_dim_outputs/
 *inacc*
 save_test_outputs.py
 save/
+verification/
